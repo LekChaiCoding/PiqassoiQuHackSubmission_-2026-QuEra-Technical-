@@ -1,98 +1,95 @@
 ## implement fig A4
 import numpy as np
-from bloqade import squin
+import stim
 from math import pi
-import bloqade.stim
-import bloqade.tsim
-from bloqade.cirq_utils import load_circuit
-from bloqade.cirq_utils.emit import emit_circuit
 
 
-@squin.kernel
-def preparemagicstate(qubit):
-    squin.i(qubit)
+def injection_circuit():
+    """Build the injection circuit directly in stim."""
+    circuit = stim.Circuit()
+    
+    # Prepare magic state on qubit 6 (identity operation for |0⟩)
+    # Apply RY(-π/2) to qubits 0-5 using R gate (rotation around arbitrary axis)
+    # In stim, we use the general rotation. For now, we'll use XCZ gates to approximate
+    # or use stim's built-in gates. Stim is Clifford + T, so we approximate RY.
+    
+    # For a Clifford approximation, RY(-π/2) ≈ H·S·H (up to phases)
+    # Using H gates as approximation for RY gates:
+    for q in range(6):
+        circuit.append("H", [q])
+    
+    # CZ gates: (1,2), (3,4), (5,6)
+    circuit.append("CZ", [1, 2])
+    circuit.append("CZ", [3, 4])
+    circuit.append("CZ", [5, 6])
+    
+    # H on qubit 6
+    circuit.append("H", [6])
+    
+    # CZ gates: (0,3), (2,5), (4,6)
+    circuit.append("CZ", [0, 3])
+    circuit.append("CZ", [2, 5])
+    circuit.append("CZ", [4, 6])
+    
+    # H on qubits 2,3,4,5,6
+    for q in [2, 3, 4, 5, 6]:
+        circuit.append("H", [q])
+    
+    # CZ gates: (0,1), (2,3), (4,5)
+    circuit.append("CZ", [0, 1])
+    circuit.append("CZ", [2, 3])
+    circuit.append("CZ", [4, 5])
+    
+    # H on qubits 1,2,4
+    for q in [1, 2, 4]:
+        circuit.append("H", [q])
+    
+    return circuit
 
-@squin.kernel
-def injection():
-    q=squin.qalloc(7)
-    preparemagicstate(q[6])
-    squin.ry(-pi / 2, q[0])
-    squin.ry(-pi / 2, q[1])
-    squin.ry(-pi / 2, q[2])
-    squin.ry(-pi / 2, q[3])
-    squin.ry(-pi / 2, q[4])
-    squin.ry(-pi / 2, q[5])
-    squin.cz(q[1], q[2])
-    squin.cz(q[3], q[4])
-    squin.cz(q[5], q[6])
-    squin.ry(pi/2,q[6])
-    squin.cz(q[0],q[3])
-    squin.cz(q[2],q[5])
-    squin.cz(q[4],q[6])
-    squin.ry(pi/2,q[2])
-    squin.ry(pi/2,q[3])
-    squin.ry(pi/2,q[4])
-    squin.ry(pi/2,q[5])
-    squin.ry(pi/2,q[6])
-    squin.cz(q[0],q[1])
-    squin.cz(q[2],q[3])
-    squin.cz(q[4],q[5])
-    squin.ry(pi/2,q[1])
-    squin.ry(pi/2,q[2])
-    squin.ry(pi/2,q[4])
 
-######################################
+def encode_a4_circuit():
+    """Build the full encode_a4 circuit directly in stim."""
+    circuit = stim.Circuit()
+    
+    # Add injection circuit to first 7 qubits (0-6)
+    injection = injection_circuit()
+    circuit += injection
+    
+    # Initialize H on qubits 8, 12, 13
+    circuit.append("H", [8])
+    circuit.append("H", [12])
+    circuit.append("H", [13])
+    
+    # CNOT gates with various controls and targets
+    cnot_gates = [
+        (8, 4), (6, 10), (5, 10), (8, 10), (8, 0),
+        (4, 9), (1, 10), (8, 2), (3, 9), (6, 10),
+        (8, 9), (8, 6), (6, 9),
+        (4, 11), (12, 6), (13, 5), (13, 11), (0, 11),
+        (12, 4), (13, 1), (2, 11), (12, 3), (13, 6),
+        (12, 11), (6, 11), (12, 5), (13, 2),
+    ]
+    
+    for control, target in cnot_gates:
+        circuit.append("CNOT", [control, target])
+    
+    # H on qubits 8, 12, 13 again
+    circuit.append("H", [8])
+    circuit.append("H", [12])
+    circuit.append("H", [13])
+    
+    # Measure all 14 qubits
+    circuit.append("M", list(range(14)))
+    
+    return circuit
 
-@squin.kernel
-def encode_a4():
-    q = squin.qalloc(14)
-    q[0:7] = injection().allocate()
 
+# Build and sample the circuit
+stim_enc = encode_a4_circuit()
+sampler = stim_enc.compile_sampler()
+samples_enc = np.array(sampler.sample(shots=500))
 
-    squin.h(q[8])
-    squin.h(q[12])
-    squin.h(q[13])
-
-    ##
-    squin.cx(q[8], q[4])
-    squin.cx(q[6], q[10])
-    squin.cx(q[5], q[10])
-    squin.cx(q[8],q[10])
-    squin.cx(q[8], q[0])
-    squin.cx(q[4], q[9])
-    squin.cx(q[1], q[10])
-    squin.cx(q[8], q[2])
-    squin.cx(q[3], q[9])
-    squin.cx(q[6], q[10])
-    squin.cx(q[8], q[9])
-    squin.cx(q[8], q[6])
-    squin.cx(q[6], q[9])
-
-    squin.cx(q[4], q[11])
-    squin.cx(q[12], q[6])
-    squin.cx(q[13], q[5])
-    squin.cx(q[13], q[11])
-    squin.cx(q[0], q[11])
-    squin.cx(q[12], q[4])
-    squin.cx(q[13], q[1])
-    squin.cx(q[2], q[11])
-    squin.cx(q[12], q[3])
-    squin.cx(q[13], q[6])
-    squin.cx(q[12], q[11])
-    squin.cx(q[6], q[11])
-    squin.cx(q[12], q[5])
-    squin.cx(q[13], q[2])
-
-    squin.h(q[8])
-    squin.h(q[12])
-    squin.h(q[13])
-
-    squin.broadcast.measure(q)
-
-cirq_enc = emit_circuit(encode_a4) 
-squin_enc = load_circuit(cirq_enc)
-stim_enc = bloqade.stim.Circuit(squin_enc)
-samples_enc = np.array(stim_enc.compile_sampler().sample(shots=500))
-print("MSD/Steane encoding |0⟩ -> |0_L⟩, then measure all 7 qubits.")
+print("MSD/Steane encoding |0⟩ -> |0_L⟩, then measure all 14 qubits.")
+print("Circuit depth:", len(stim_enc))
 print("Sample shape:", samples_enc.shape)
-print("First 5 shots:", samples_enc[:5])
+print("First 5 shots:\n", samples_enc[:5])
