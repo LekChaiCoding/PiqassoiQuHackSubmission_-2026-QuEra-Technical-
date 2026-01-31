@@ -1,0 +1,19 @@
+# Environment setup (macOS / Linux)
+
+## Python
+Use Python 3.11 (recommended)
+
+## Create venv
+python3.11 -m venv .venv
+source .venv/bin/activate
+
+## Install dependencies
+pip install -U pip
+pip install ipykernel
+pip install "bloqade-circuit[cirq,stim,tsim]>=0.11.0" "stimcirq>=1.15.0"
+
+## Register Jupyter kernel
+python -m ipykernel install --user --name quera-qec --display-name "quera-qec (Python 3.11)"
+
+## VS Code
+Select kernel → quera-qec (Python 3.11)
