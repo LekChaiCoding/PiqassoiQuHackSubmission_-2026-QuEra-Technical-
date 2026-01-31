@@ -4,6 +4,9 @@
 from bloqade import squin
 from bloqade.types import Qubit
 from kirin.dialects import ilist
+from bloqade.cirq_utils import load_circuit
+from bloqade.cirq_utils.emit import emit_circuit
+import bloqade.stim
 import numpy as np
 from math import pi
 from typing import Literal
@@ -78,13 +81,16 @@ def a3_circuit():
     for i in range(8, 15):
         squin.measure(q[i])
 
-    return squin.result()
 
-stim_enc = a3_circuit()
+# ---------------------------------------------------------------------------
+# Execute and sample
+# ---------------------------------------------------------------------------
+cirq_enc = emit_circuit(a3_circuit)
+squin_enc = load_circuit(cirq_enc)
+stim_enc = bloqade.stim.Circuit(squin_enc)
 sampler = stim_enc.compile_sampler()
 samples_enc = np.array(sampler.sample(shots=500))
 
-print("MSD/Steane encoding |0⟩ -> |0_L⟩, then measure all 14 qubits.")
-print("Circuit depth:", len(stim_enc))
+print("MSD/Steane encoding A3 circuit: 15 qubits (7 data + 7 ancilla + 1 unused)")
 print("Sample shape:", samples_enc.shape)
 print("First 5 shots:\n", samples_enc[:5])
