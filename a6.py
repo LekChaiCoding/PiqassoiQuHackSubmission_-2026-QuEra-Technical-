@@ -12,6 +12,8 @@ import numpy as np
 from math import pi
 from typing import Literal
 
+
+#flag qbit 11 (index 10)
 def a6_circuit():
     q = squin.qalloc(11)
 
@@ -37,5 +39,5 @@ def a6_circuit():
     for i in range(5,10):
         squin.measure(q[i])
     
-    
+
     
