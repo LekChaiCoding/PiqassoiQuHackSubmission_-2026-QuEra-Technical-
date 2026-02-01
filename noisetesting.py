@@ -18,6 +18,7 @@ from kirin.dialects import ilist
 from bloqade.cirq_utils import load_circuit, emit_circuit, noise
 import bloqade.stim
 import numpy as np
+from math import pi
 import matplotlib.pyplot as plt
 from typing import Literal
 import json
@@ -33,6 +34,54 @@ NUM_WORKERS = min(os.cpu_count() or 4, 10)  # Cap at 10 to avoid overhead
 # ============================================================================
 # CIRCUIT DEFINITIONS (from a3.ipynb)
 # ============================================================================
+
+@squin.kernel
+def magicstateprep(qubits, ind):
+    #squin.h(qubits[ind])
+    squin.t(qubits[ind])
+
+
+@squin.kernel
+def injection(q: ilist.IList[Qubit, Literal[7]]):
+    """Apply magic-state injection to the 7-qubit register `q` (allocated by caller)."""
+    squin.reset(q[0:2])
+    squin.reset(q[3:7])
+    magicstateprep(q, 2)
+    # ry(-pi/2) on old 0..5  ->  new [3,1,0,6,4,5]
+    for j in (3, 1, 0, 6, 4, 5):
+        squin.ry(-pi / 2, q[j])
+
+    # cz(1,2), cz(3,4), cz(5,6) -> cz(1,0), cz(6,4), cz(5,2)
+    squin.cz(q[1], q[0])
+    squin.cz(q[6], q[4])
+    squin.cz(q[5], q[2])
+
+    # ry on old 6 -> new 2
+    squin.ry(pi / 2, q[2])
+
+    # cz(0,3), cz(2,5), cz(4,6) -> cz(3,6), cz(0,5), cz(4,2)
+    squin.cz(q[3], q[6])
+    squin.cz(q[0], q[5])
+    squin.cz(q[4], q[2])
+
+    # ry on old 2..6 -> new [0,6,4,5,2]
+    for j in (0, 6, 4, 5, 2):
+        squin.ry(pi / 2, q[j])
+
+    # cz(0,1), cz(2,3), cz(4,5) -> cz(3,1), cz(0,6), cz(4,5)
+    squin.cz(q[3], q[1])
+    squin.cz(q[0], q[6])
+    squin.cz(q[4], q[5])
+
+    # final single-qubit ry: old 1 -> 1, old 2 -> 0, old 4 -> 4
+    squin.ry(pi / 2, q[1])
+    squin.ry(pi / 2, q[0])
+    squin.ry(pi / 2, q[4])
+    squin.z(q[3])
+    squin.x(q[0])
+    squin.x(q[1])
+    squin.x(q[3])
+
 
 @squin.kernel
 def steane_encode_zero_on(q: ilist.IList[Qubit, Literal[7]]):
@@ -63,9 +112,11 @@ def a3_circuit():
     """A3 circuit implementation in squin - Fault-tolerant Steane syndrome extraction."""
     q = squin.qalloc(21)
     
-    # Prepare data qubits (0-6)
-    steane_encode_zero_on(q[0:7])
-    
+    #steane_encode_zero_on(q[0:7])
+    injection(q)
+    # Qubits 0-6: logical data
+    # Qubits 8-14 + 15-21: ancilla block
+
     # Prepare ancilla as |+⟩_L for first half (X-stabilizer syndrome)
     steane_encode_plus_on(q[7:14])
 
@@ -195,7 +246,8 @@ _NOISE_PARAMS = [
     'local_px', 'local_py', 'local_pz',
     'local_unaddressed_px', 'local_unaddressed_py', 'local_unaddressed_pz',
     'cz_paired_gate_px', 'cz_paired_gate_py', 'cz_paired_gate_pz',
-    'cz_unpaired_gate_px', 'cz_unpaired_gate_py', 'cz_unpaired_gate_pz',
+    'cz_unpaired_gate_px', 'cz_unpaired_gate_py', 'cz_unpaired_gate_pz', 'sitter_px', 
+    'sitter_py', 'sitter_pz', 'mover_px', 'mover_py', 'mover_pz',
 ]
 
 
@@ -342,18 +394,19 @@ def plot_individual_analyses(coeffs, scaling_fidelities, all_param_results):
             except:
                 pass
         
-        ax.set_xlabel(param_name.replace('_', '\n'), fontsize=8)
-        ax.set_ylabel('Fidelity', fontsize=8)
+        # Shorten parameter name for title: remove common prefixes, use abbreviations
+        short_name = param_name.replace('local_unaddressed_', 'lu_').replace('cz_unpaired_gate_', 'cz_up_').replace('cz_paired_gate_', 'cz_pr_').replace('global_', 'g_').replace('local_', 'l_')
+        ax.set_title(short_name, fontsize=7, fontweight='bold')
+        ax.set_ylabel('Fidelity', fontsize=7)
         ax.set_ylim([0, 1.05])
         ax.grid(True, linestyle='--', alpha=0.3, zorder=0)
-        ax.tick_params(labelsize=7)
+        ax.tick_params(labelsize=6)
         
         if np.max(param_values) < 0.01:
             ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
     
-    plt.suptitle('Comprehensive Noise Analysis: All GeminiOneZoneNoiseModel Parameters', 
-                 fontsize=14, fontweight='bold', y=0.99)
-    plt.tight_layout(rect=[0, 0, 1, 0.98])
+    plt.suptitle('Noise Analysis: GeminiOneZoneNoiseModel', fontsize=12, fontweight='bold', y=0.99)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
     
     return fig
 
