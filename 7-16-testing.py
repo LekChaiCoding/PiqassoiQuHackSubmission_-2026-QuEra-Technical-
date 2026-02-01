@@ -1,12 +1,18 @@
 """
-magictesting.py - Magic State Preparation Comparison Analysis
-==============================================================
+7-16-testing.py - Comparison of d=3 [[7,1,3]] vs d=5 [[17,1,5]] Distillation
+==============================================================================
 
-This module compares two magic state preparation methods:
-1. Original: T gate only
-2. Modified: H gate followed by T gate
+This module compares the noise resilience of two magic state distillation circuits:
+- d=3 [[7,1,3]] Steane code (7 qubits) - from noisetesting.py
+- d=5 [[17,1,5]] code (17 qubits) - from d5_piqasso_16_qubits.py
 
-Tests scaling coefficient and CZ unpaired gate noise parameters.
+Tests:
+- Scaling coefficient analysis comparing both circuits
+- CZ unpaired gate parameters (cz_unpaired_gate_px/py/pz)
+- Mover/Sitter parameters (TwoZone model only)
+
+Parts include code attributed to bloqade-circuit (https://github.com/QuEraComputing/bloqade-circuit/tree/main).
+Apache License 2.0 with LLVM Exceptions. Modified by Team Piqasso, 1 Feb. 2026.
 """
 
 from bloqade import squin
@@ -36,7 +42,7 @@ NUM_WORKERS = min(os.cpu_count() or 4, 10)
 # TWO-ZONE NOISE MODEL HELPER FUNCTIONS (from a3_twozone.ipynb)
 # ============================================================================
 
-Slot = Tuple[int, int]  # (tuple index, position inside tuple)
+Slot = Tuple[int, int]
 Swap = Tuple[Slot, Slot]
 
 
@@ -169,7 +175,7 @@ def _pad_with_empty_tups(
     target: List[Tuple[int, ...]], nqubs: int
 ) -> List[Tuple[int, ...]]:
     """Pad target list with empty tuples to reach nqubs length. Returns a copy."""
-    result = list(target)  # Make a copy to avoid mutating input
+    result = list(target)
     while len(result) < nqubs:
         result.append(())
     return result
@@ -236,7 +242,6 @@ def _get_gate_error_channel(
     new_moments = cirq.Circuit()
 
     if gates_in_layer["cz"] == []:
-        # Check if all angles are the same (global gate) - must have angles to compare
         angles = gates_in_layer["angles"]
         is_global = (
             len(angles) > 0 and
@@ -374,7 +379,7 @@ def _get_move_error_channel_two_zoned(
         )
 
         swap_noise_circ = _add_noise_to_swaps(
-            swaps, intsc_rev, move_pauli_channel, sitter_pauli_channel, nqubs
+            swaps, _pad_with_empty_tups(intsc_rev, nqubs), move_pauli_channel, sitter_pauli_channel, nqubs
         )
         dumb_circ.append(swap_noise_circ)
 
@@ -382,7 +387,7 @@ def _get_move_error_channel_two_zoned(
 
 
 # ============================================================================
-# CUSTOM TWO-ZONE NOISE MODEL (from a3_twozone.ipynb)
+# CUSTOM TWO-ZONE NOISE MODEL
 # ============================================================================
 
 @dataclass(frozen=True)
@@ -477,38 +482,34 @@ def get_noise_model_class():
     return noise.GeminiOneZoneNoiseModel
 
 
+def _get_noise_model_class(use_two_zone):
+    """Worker-safe: Get the appropriate noise model class."""
+    if use_two_zone:
+        return CustomGeminiTwoZoneNoiseModel
+    return noise.GeminiOneZoneNoiseModel
+
+
 def get_model_name():
     """Get the display name of the current model."""
     return "CustomGeminiTwoZoneNoiseModel" if _USE_TWO_ZONE else "GeminiOneZoneNoiseModel"
 
 
 # ============================================================================
-# MAGIC STATE PREPARATION VARIANTS
+# D=3 [[7,1,3]] CIRCUIT DEFINITIONS (from noisetesting.py)
 # ============================================================================
 
 @squin.kernel
-def magicstateprep_t_only(qubits, ind):
-    """Original magic state prep: T gate only."""
+def magicstateprep_d3(qubits, ind):
+    """Magic state preparation for d=3."""
     squin.t(qubits[ind])
 
 
 @squin.kernel
-def magicstateprep_h_then_t(qubits, ind):
-    """Modified magic state prep: H gate before T gate."""
-    squin.h(qubits[ind])
-    squin.t(qubits[ind])
-
-
-# ============================================================================
-# INJECTION CIRCUITS (two variants)
-# ============================================================================
-
-@squin.kernel
-def injection_t_only(q: ilist.IList[Qubit, Literal[7]]):
-    """Injection using T-only magic state prep."""
+def injection_d3(q: ilist.IList[Qubit, Literal[7]]):
+    """Apply magic-state injection to the 7-qubit register (d=3 Steane code)."""
     squin.reset(q[0:2])
     squin.reset(q[3:7])
-    magicstateprep_t_only(q, 2)
+    magicstateprep_d3(q, 2)
     
     for j in (3, 1, 0, 6, 4, 5):
         squin.ry(-pi / 2, q[j])
@@ -538,46 +539,6 @@ def injection_t_only(q: ilist.IList[Qubit, Literal[7]]):
     squin.x(q[1])
     squin.x(q[3])
 
-
-@squin.kernel
-def injection_h_then_t(q: ilist.IList[Qubit, Literal[7]]):
-    """Injection using H+T magic state prep."""
-    squin.reset(q[0:2])
-    squin.reset(q[3:7])
-    magicstateprep_h_then_t(q, 2)
-    
-    for j in (3, 1, 0, 6, 4, 5):
-        squin.ry(-pi / 2, q[j])
-
-    squin.cz(q[1], q[0])
-    squin.cz(q[6], q[4])
-    squin.cz(q[5], q[2])
-
-    squin.ry(pi / 2, q[2])
-
-    squin.cz(q[3], q[6])
-    squin.cz(q[0], q[5])
-    squin.cz(q[4], q[2])
-
-    for j in (0, 6, 4, 5, 2):
-        squin.ry(pi / 2, q[j])
-
-    squin.cz(q[3], q[1])
-    squin.cz(q[0], q[6])
-    squin.cz(q[4], q[5])
-
-    squin.ry(pi / 2, q[1])
-    squin.ry(pi / 2, q[0])
-    squin.ry(pi / 2, q[4])
-    squin.z(q[3])
-    squin.x(q[0])
-    squin.x(q[1])
-    squin.x(q[3])
-
-
-# ============================================================================
-# STEANE ENCODING
-# ============================================================================
 
 @squin.kernel
 def steane_encode_zero_on(q: ilist.IList[Qubit, Literal[7]]):
@@ -603,36 +564,12 @@ def steane_encode_plus_on(q: ilist.IList[Qubit, Literal[7]]):
         squin.h(q[i])
 
 
-# ============================================================================
-# A3 CIRCUITS (two variants)
-# ============================================================================
-
 @squin.kernel
-def a3_circuit_t_only():
-    """A3 circuit with T-only magic state prep."""
+def d3_circuit():
+    """d=3 [[7,1,3]] A3 circuit - Fault-tolerant Steane syndrome extraction."""
     q = squin.qalloc(21)
-    injection_t_only(q[0:7])
     
-    steane_encode_plus_on(q[7:14])
-    for i in range(7):
-        squin.cx(q[i], q[i+7])
-    
-    steane_encode_zero_on(q[14:21])
-    for i in range(7):
-        squin.cx(q[i+14], q[i])
-
-    for i in range(7):
-        squin.h(q[i+14])
-    
-    for i in range(7, 21):
-        squin.measure(q[i])
-
-
-@squin.kernel
-def a3_circuit_h_then_t():
-    """A3 circuit with H+T magic state prep."""
-    q = squin.qalloc(21)
-    injection_h_then_t(q[0:7])
+    injection_d3(q[0:7])
     
     steane_encode_plus_on(q[7:14])
     for i in range(7):
@@ -650,10 +587,124 @@ def a3_circuit_h_then_t():
 
 
 # ============================================================================
-# FIDELITY AND SYNDROME DETECTION
+# D=5 [[17,1,5]] CIRCUIT DEFINITIONS (from d5_piqasso_16_qubits.py)
 # ============================================================================
 
-SYND_INDICES = [[1, 3, 5, 7], [4, 5, 6, 7], [2, 3, 6, 7]]
+@squin.kernel
+def prepare_magic_d5(q):
+    """Prepare magic state |T⟩ = H|0⟩ then T."""
+    squin.h(q)
+    squin.t(q)
+
+
+@squin.kernel
+def d5_injection(q: ilist.IList[Qubit, Literal[17]]):
+    """d=5 [[17,1,5]] encoding with magic state injection."""
+    # Magic state on center qubit
+    prepare_magic_d5(q[7])
+    
+    # √Y on all ancillas (not q[7])
+    squin.ry(pi/2, q[0])
+    squin.ry(pi/2, q[1])
+    squin.ry(pi/2, q[2])
+    squin.ry(pi/2, q[3])
+    squin.ry(pi/2, q[4])
+    squin.ry(pi/2, q[5])
+    squin.ry(pi/2, q[6])
+    # skip q[7] - has magic state
+    squin.ry(pi/2, q[8])
+    squin.ry(pi/2, q[9])
+    squin.ry(pi/2, q[10])
+    squin.ry(pi/2, q[11])
+    squin.ry(pi/2, q[12])
+    squin.ry(pi/2, q[13])
+    squin.ry(pi/2, q[14])
+    squin.ry(pi/2, q[15])
+    squin.ry(pi/2, q[16])
+    
+    # CZ Layer 1
+    squin.cz(q[1], q[3])
+    squin.cz(q[3], q[10])
+    squin.cz(q[7], q[10])
+    squin.cz(q[12], q[14])
+    squin.cz(q[13], q[16])
+    
+    # √Y† on center
+    squin.ry(-pi/2, q[7])
+    squin.ry(-pi/2, q[16])
+    
+    # CZ Layer 2
+    squin.cz(q[4], q[7])
+    squin.cz(q[8], q[10])
+    squin.cz(q[11], q[14])
+    squin.cz(q[15], q[16])
+    
+    # √Y† layer
+    squin.ry(-pi/2, q[4])
+    squin.ry(-pi/2, q[10])
+    squin.ry(-pi/2, q[14])
+    squin.ry(-pi/2, q[16])
+    
+    # CZ Layer 3
+    squin.cz(q[2], q[4])
+    squin.cz(q[6], q[8])
+    squin.cz(q[7], q[9])
+    squin.cz(q[10], q[13])
+    squin.cz(q[14], q[16])
+    
+    # Final √Y
+    squin.ry(pi/2, q[1])
+    squin.ry(pi/2, q[2])
+    squin.ry(pi/2, q[3])
+    squin.ry(pi/2, q[4])
+    squin.ry(pi/2, q[6])
+    squin.ry(pi/2, q[7])
+    squin.ry(pi/2, q[8])
+    squin.ry(pi/2, q[9])
+    squin.ry(pi/2, q[11])
+    squin.ry(pi/2, q[12])
+    squin.ry(pi/2, q[14])
+
+    # Final CZ 
+    squin.cz(q[0], q[1])
+    squin.cz(q[2], q[3])
+    squin.cz(q[4], q[5])
+    squin.cz(q[6], q[7])
+    squin.cz(q[8], q[9])
+    squin.cz(q[12], q[15])
+
+    # Final √Y†
+    squin.ry(-pi/2, q[0])
+    squin.ry(-pi/2, q[2])
+    squin.ry(-pi/2, q[5])
+    squin.ry(-pi/2, q[6])
+    squin.ry(-pi/2, q[8])
+    squin.ry(-pi/2, q[10])
+    squin.ry(-pi/2, q[12])
+
+
+@squin.kernel
+def d5_circuit():
+    """
+    Full d=5 circuit with injection and measurement.
+    Uses 17 qubits for the [[17,1,5]] code.
+    """
+    q = squin.qalloc(17)
+    
+    # Apply d=5 injection
+    d5_injection(q[0:17])
+    
+    # Measure all qubits
+    for i in range(17):
+        squin.measure(q[i])
+
+
+# ============================================================================
+# FIDELITY CALCULATION
+# ============================================================================
+
+# Syndrome indices for Steane [[7,1,3]] code (d=3)
+SYND_INDICES_D3 = [[1, 3, 5, 7], [4, 5, 6, 7], [2, 3, 6, 7]]
 
 
 def _check_syndrome(bits, indices):
@@ -662,16 +713,42 @@ def _check_syndrome(bits, indices):
     return parity == 1
 
 
-def find_good_rate(samples):
-    """Calculate fidelity: fraction of samples with all 6 syndromes triggered."""
+def find_good_rate_d3(samples):
+    """Calculate fidelity for d=3 circuit: fraction with all 6 syndromes triggered."""
     samples = np.asarray(samples)
     good = 0
     for sample in samples:
         x_bits, z_bits = sample[:7], sample[7:14]
-        count = sum(_check_syndrome(x_bits, idx) for idx in SYND_INDICES)
-        count += sum(_check_syndrome(z_bits, idx) for idx in SYND_INDICES)
+        count = sum(_check_syndrome(x_bits, idx) for idx in SYND_INDICES_D3)
+        count += sum(_check_syndrome(z_bits, idx) for idx in SYND_INDICES_D3)
         good += (count == 6)
     return good / len(samples)
+
+
+def find_good_rate_d5(samples):
+    """
+    Calculate fidelity for d=5 circuit.
+    
+    For the d=5 [[17,1,5]] code injection, we check for consistency
+    in the measured bit patterns based on CZ gate correlations.
+    """
+    samples = np.asarray(samples)
+    n_samples = len(samples)
+    
+    good = 0
+    for sample in samples:
+        # Check parity relationships from the CZ structure
+        p1 = (sample[1] ^ sample[3] ^ sample[10]) % 2
+        p2 = (sample[7] ^ sample[10]) % 2
+        p3 = (sample[12] ^ sample[14]) % 2
+        p4 = (sample[4] ^ sample[7]) % 2
+        p5 = (sample[6] ^ sample[8] ^ sample[9]) % 2
+        
+        parity_sum = p1 + p2 + p3 + p4 + p5
+        if parity_sum <= 2:
+            good += 1
+    
+    return good / n_samples
 
 
 # ============================================================================
@@ -680,45 +757,66 @@ def find_good_rate(samples):
 
 # Circuit caches for both variants
 _circuit_cache = {
-    't_only': None,
-    'h_then_t': None
+    'd3': None,
+    'd5': None
 }
 
 
 def _get_circuit(variant):
-    """Get cached circuit for specified variant."""
+    """Get cached circuit for specified variant ('d3' or 'd5')."""
     global _circuit_cache
     if _circuit_cache[variant] is None:
-        if variant == 't_only':
-            _circuit_cache[variant] = emit_circuit(a3_circuit_t_only)
+        if variant == 'd3':
+            _circuit_cache[variant] = emit_circuit(d3_circuit)
         else:
-            _circuit_cache[variant] = emit_circuit(a3_circuit_h_then_t)
+            _circuit_cache[variant] = emit_circuit(d5_circuit)
     return _circuit_cache[variant]
 
 
-def run_simulation(variant, noise_model, shots=1000):
+def run_simulation_with_noise(variant, noise_model, shots=1000):
     """Run circuit variant with noise model and return fidelity."""
+    circuit = _get_circuit(variant)
     if _USE_TWO_ZONE:
-        cirq_circuit = _transform_circuit_two_zone(_get_circuit(variant), model=noise_model)
+        cirq_circuit = _transform_circuit_two_zone(circuit, model=noise_model)
     else:
-        cirq_circuit = noise.transform_circuit(_get_circuit(variant), model=noise_model)
+        cirq_circuit = noise.transform_circuit(circuit, model=noise_model)
     stim_circuit = bloqade.stim.Circuit(load_circuit(cirq_circuit))
     samples = np.array(stim_circuit.compile_sampler().sample(shots=shots))
-    return find_good_rate(samples)
+    
+    if variant == 'd3':
+        return find_good_rate_d3(samples)
+    else:
+        return find_good_rate_d5(samples)
+
+
+def _run_simulation(variant, noise_model, shots, use_two_zone):
+    """Worker-safe: Run circuit with noise model and return fidelity."""
+    circuit = _get_circuit(variant)
+    if use_two_zone:
+        cirq_circuit = _transform_circuit_two_zone(circuit, model=noise_model)
+    else:
+        cirq_circuit = noise.transform_circuit(circuit, model=noise_model)
+    stim_circuit = bloqade.stim.Circuit(load_circuit(cirq_circuit))
+    samples = np.array(stim_circuit.compile_sampler().sample(shots=shots))
+    
+    if variant == 'd3':
+        return find_good_rate_d3(samples)
+    else:
+        return find_good_rate_d5(samples)
 
 
 # ============================================================================
-# NOISE PARAMETERS TO TEST
+# NOISE PARAMETERS (LIMITED SET)
 # ============================================================================
 
-# Base noise parameters
+# Base parameters: only cz_unpaired
 _BASE_NOISE_PARAMS = [
     'cz_unpaired_gate_px',
     'cz_unpaired_gate_py',
     'cz_unpaired_gate_pz',
 ]
 
-# Additional parameters only for GeminiTwoZoneNoiseModel
+# Two-zone extra: mover and sitter
 _TWO_ZONE_EXTRA_PARAMS = [
     'sitter_px', 'sitter_py', 'sitter_pz',
     'mover_px', 'mover_py', 'mover_pz',
@@ -732,9 +830,21 @@ def get_noise_params():
     return _BASE_NOISE_PARAMS
 
 
+def _get_noise_params(use_two_zone):
+    """Worker-safe: Get the appropriate noise parameters."""
+    if use_two_zone:
+        return _BASE_NOISE_PARAMS + _TWO_ZONE_EXTRA_PARAMS
+    return _BASE_NOISE_PARAMS
+
+
 def get_zero_params():
     """Get zero params dict for the selected model."""
     return {p: 0.0 for p in get_noise_params()}
+
+
+def _get_zero_params(use_two_zone):
+    """Worker-safe: Get zero params dict."""
+    return {p: 0.0 for p in _get_noise_params(use_two_zone)}
 
 
 # ============================================================================
@@ -742,22 +852,22 @@ def get_zero_params():
 # ============================================================================
 
 def _run_scaling_test(args):
-    """Worker for scaling coefficient test."""
-    variant, coeff, shots = args
-    NoiseModelClass = get_noise_model_class()
+    """Worker function for parallel scaling coefficient tests."""
+    variant, coeff, shots, use_two_zone = args
+    NoiseModelClass = _get_noise_model_class(use_two_zone)
     noise_model = NoiseModelClass(scaling_factor=coeff)
-    fidelity = run_simulation(variant, noise_model, shots=shots)
+    fidelity = _run_simulation(variant, noise_model, shots=shots, use_two_zone=use_two_zone)
     return (variant, coeff), fidelity
 
 
 def _run_param_test(args):
-    """Worker for parameter sweep test."""
-    variant, param_name, param_val, shots = args
-    params = get_zero_params()
+    """Worker function for parallel parameter tests."""
+    variant, param_name, param_val, shots, use_two_zone = args
+    params = _get_zero_params(use_two_zone)
     params[param_name] = param_val
-    NoiseModelClass = get_noise_model_class()
+    NoiseModelClass = _get_noise_model_class(use_two_zone)
     noise_model = NoiseModelClass(**params)
-    fidelity = run_simulation(variant, noise_model, shots=shots)
+    fidelity = _run_simulation(variant, noise_model, shots=shots, use_two_zone=use_two_zone)
     return (variant, param_name, param_val), fidelity
 
 
@@ -765,12 +875,17 @@ def _run_param_test(args):
 # ANALYSIS FUNCTIONS
 # ============================================================================
 
-def analyze_scaling_comparison(coeff_range, shots=500, verbose=True):
-    """Compare scaling coefficient behavior between both variants."""
+def analyze_scaling_comparison(coeff_range=None, shots=500, verbose=True):
+    """Compare scaling coefficient behavior between d3 and d5 circuits."""
+    if coeff_range is None:
+        coeff_range = np.linspace(0.1, 3.0, 25)
+    
+    # Build args for both variants
+    use_two_zone = _USE_TWO_ZONE
     all_args = []
-    for variant in ['t_only', 'h_then_t']:
+    for variant in ['d3', 'd5']:
         for coeff in coeff_range:
-            all_args.append((variant, coeff, shots))
+            all_args.append((variant, coeff, shots, use_two_zone))
     
     total = len(all_args)
     if verbose:
@@ -788,33 +903,31 @@ def analyze_scaling_comparison(coeff_range, shots=500, verbose=True):
     if verbose:
         print(f"    Progress: {total}/{total} (100%)")
     
-    # Organize results by variant
-    t_only_fids = np.array([results[('t_only', c)] for c in coeff_range])
-    h_then_t_fids = np.array([results[('h_then_t', c)] for c in coeff_range])
+    # Organize by variant
+    d3_fids = np.array([results[('d3', c)] for c in coeff_range])
+    d5_fids = np.array([results[('d5', c)] for c in coeff_range])
     
     return {
-        't_only': t_only_fids,
-        'h_then_t': h_then_t_fids
+        'd3': d3_fids,
+        'd5': d5_fids,
+        'coeffs': np.array(coeff_range)
     }
 
 
-def analyze_params_comparison(iterations=20, shots=500, verbose=True):
-    """Compare parameter sweeps between both variants."""
+def analyze_params_comparison(iterations=15, shots=500, verbose=True):
+    """Compare parameter sweeps between d3 and d5 circuits."""
+    use_two_zone = _USE_TWO_ZONE
+    noise_params = get_noise_params()
+    
     all_args = []
     param_ranges = {}
     
-    noise_params = get_noise_params()
-    
     for param_name in noise_params:
-        # gate params and mover/sitter get larger range
-        if 'gate' in param_name.lower() or 'mover' in param_name.lower() or 'sitter' in param_name.lower():
-            param_values = np.linspace(0, 5e-2, iterations)
-        else:
-            param_values = np.linspace(0, 2e-3, iterations)
+        param_values = np.linspace(0, 5e-2, iterations)
         param_ranges[param_name] = param_values
-        for variant in ['t_only', 'h_then_t']:
+        for variant in ['d3', 'd5']:
             for pv in param_values:
-                all_args.append((variant, param_name, pv, shots))
+                all_args.append((variant, param_name, pv, shots, use_two_zone))
     
     total = len(all_args)
     if verbose:
@@ -836,12 +949,12 @@ def analyze_params_comparison(iterations=20, shots=500, verbose=True):
     param_results = {}
     for param_name in noise_params:
         pvals = param_ranges[param_name]
-        t_only_fids = np.array([results[('t_only', param_name, pv)] for pv in pvals])
-        h_then_t_fids = np.array([results[('h_then_t', param_name, pv)] for pv in pvals])
+        d3_fids = np.array([results[('d3', param_name, pv)] for pv in pvals])
+        d5_fids = np.array([results[('d5', param_name, pv)] for pv in pvals])
         param_results[param_name] = {
             'values': pvals,
-            't_only': t_only_fids,
-            'h_then_t': h_then_t_fids
+            'd3': d3_fids,
+            'd5': d5_fids
         }
     
     return param_results
@@ -851,7 +964,6 @@ def analyze_params_comparison(iterations=20, shots=500, verbose=True):
 # VISUALIZATION
 # ============================================================================
 
-# Fit functions
 def _exp_decay(x, A, b):
     return A * np.exp(-b * x)
 
@@ -862,98 +974,153 @@ def _r_squared(y_true, y_pred):
     return 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
 
 
-def plot_comparison(coeffs, scaling_results, param_results):
-    """Create comparison plots for both magic state prep variants."""
+def plot_comparison_results(scaling_results, param_results):
+    """Create comparison visualization plots for d=3 vs d=5 noise analysis."""
+    
+    coeffs = scaling_results['coeffs']
+    d3_scaling = scaling_results['d3']
+    d5_scaling = scaling_results['d5']
     
     n_params = len(param_results)
-    n_cols = min(n_params, 3)
-    n_rows = (n_params + n_cols - 1) // n_cols  # Ceiling division
+    # Use 3 columns for TwoZone (9 params), but ensure proper layout
+    n_cols = 3
+    n_rows = (n_params + n_cols - 1) // n_cols
     
-    fig = plt.figure(figsize=(16, 5 + 4 * n_rows))
+    # Calculate figure size: wider for more columns, taller for more rows
+    fig_width = 6 * n_cols
+    fig_height = 5 + 4.5 * n_rows  # Extra space for top plot + param plots
     
-    # Color scheme
-    colors = {
-        't_only': '#e74c3c',      # Red
-        'h_then_t': '#3498db'     # Blue
-    }
-    labels = {
-        't_only': 'Non-Magic',
-        'h_then_t': 'Magic'
-    }
+    fig = plt.figure(figsize=(fig_width, fig_height))
     
-    # ---- Top Plot: Scaling Coefficient Comparison ----
-    ax_top = fig.add_subplot(n_rows + 1, 1, 1)
+    # Use GridSpec for better control over subplot spacing
+    from matplotlib.gridspec import GridSpec
+    gs = GridSpec(n_rows + 1, n_cols, figure=fig, 
+                  height_ratios=[1.2] + [1] * n_rows,
+                  hspace=0.35, wspace=0.3)
     
-    for variant in ['t_only', 'h_then_t']:
-        fids = scaling_results[variant]
-        ax_top.scatter(coeffs, fids, s=60, alpha=0.7, color=colors[variant],
-                      edgecolors='black', linewidth=0.5, label=f'{labels[variant]} (data)')
-        
-        # Fit exponential decay
-        try:
-            popt, _ = curve_fit(_exp_decay, coeffs, fids, p0=[fids[0], 0.5], maxfev=10000)
-            fit_x = np.linspace(coeffs.min(), coeffs.max(), 100)
-            r2 = _r_squared(fids, _exp_decay(coeffs, *popt))
-            ax_top.plot(fit_x, _exp_decay(fit_x, *popt), '--', color=colors[variant],
-                       linewidth=2, alpha=0.8, 
-                       label=f'{labels[variant]}: {popt[0]:.3f}·e^(-{popt[1]:.3f}c) [R²={r2:.3f}]')
-        except (RuntimeError, ValueError):
-            pass
+    # ---- Top Plot: Scaling Comparison (spans all columns) ----
+    ax_top = fig.add_subplot(gs[0, :])
+    
+    # d=3 data (7 qubits)
+    ax_top.scatter(coeffs, d3_scaling, s=80, alpha=0.8, color='#e74c3c',
+                   edgecolors='black', linewidth=1, zorder=5, marker='o',
+                   label='d=3 [[7,1,3]] (7 qubits)')
+    
+    # d=5 data (17 qubits)
+    ax_top.scatter(coeffs, d5_scaling, s=80, alpha=0.8, color='#2980b9',
+                   edgecolors='black', linewidth=1, zorder=5, marker='s',
+                   label='d=5 [[17,1,5]] (17 qubits)')
+    
+    # Fit exponential decay for both
+    try:
+        popt_d3, _ = curve_fit(_exp_decay, coeffs, d3_scaling, 
+                               p0=[d3_scaling[0], 0.5], maxfev=10000)
+        fit_x = np.linspace(coeffs.min(), coeffs.max(), 100)
+        r2_d3 = _r_squared(d3_scaling, _exp_decay(coeffs, *popt_d3))
+        ax_top.plot(fit_x, _exp_decay(fit_x, *popt_d3), '-', color='#e74c3c',
+                   linewidth=2, alpha=0.6,
+                   label=f'd3: {popt_d3[0]:.2f}·exp(-{popt_d3[1]:.2f}x) R²={r2_d3:.3f}')
+        print(f"  d=3 Scaling fit: A={popt_d3[0]:.4f}, b={popt_d3[1]:.4f}, R²={r2_d3:.4f}")
+    except (RuntimeError, ValueError):
+        print("  Warning: Could not fit d=3 scaling data")
+    
+    try:
+        popt_d5, _ = curve_fit(_exp_decay, coeffs, d5_scaling, 
+                               p0=[d5_scaling[0], 0.5], maxfev=10000)
+        fit_x = np.linspace(coeffs.min(), coeffs.max(), 100)
+        r2_d5 = _r_squared(d5_scaling, _exp_decay(coeffs, *popt_d5))
+        ax_top.plot(fit_x, _exp_decay(fit_x, *popt_d5), '-', color='#2980b9',
+                   linewidth=2, alpha=0.6,
+                   label=f'd5: {popt_d5[0]:.2f}·exp(-{popt_d5[1]:.2f}x) R²={r2_d5:.3f}')
+        print(f"  d=5 Scaling fit: A={popt_d5[0]:.4f}, b={popt_d5[1]:.4f}, R²={r2_d5:.4f}")
+    except (RuntimeError, ValueError):
+        print("  Warning: Could not fit d=5 scaling data")
     
     ax_top.set_xlabel('Scaling Coefficient', fontsize=11, fontweight='bold')
     ax_top.set_ylabel('Fidelity', fontsize=11, fontweight='bold')
-    ax_top.set_title(f'Scaling Coefficient: Non-Magic vs Magic ({get_model_name()})', fontsize=12, fontweight='bold')
+    ax_top.set_title(f'd=3 vs d=5 Scaling Comparison ({get_model_name()})', 
+                    fontsize=12, fontweight='bold', pad=10)
     ax_top.set_ylim([0, 1.05])
     ax_top.grid(True, linestyle='--', alpha=0.4)
-    ax_top.legend(fontsize=9, loc='best')
+    ax_top.legend(fontsize=9, loc='upper right', framealpha=0.9)
     
-    # ---- Bottom Plots: Parameter Sweeps ----
-    param_names = list(param_results.keys())
-    # Shorten parameter names for display
-    short_names = {
-        'cz_unpaired_gate_px': 'cz_up_px',
-        'cz_unpaired_gate_py': 'cz_up_py',
-        'cz_unpaired_gate_pz': 'cz_up_pz',
-        'sitter_px': 'sit_px',
-        'sitter_py': 'sit_py',
-        'sitter_pz': 'sit_pz',
-        'mover_px': 'mov_px',
-        'mover_py': 'mov_py',
-        'mover_pz': 'mov_pz',
+    # ---- Parameter Sweep Comparison Plots ----
+    # Cleaner display names
+    display_names = {
+        'cz_unpaired_gate_px': 'CZ Unpaired Px',
+        'cz_unpaired_gate_py': 'CZ Unpaired Py',
+        'cz_unpaired_gate_pz': 'CZ Unpaired Pz',
+        'sitter_px': 'Sitter Px',
+        'sitter_py': 'Sitter Py',
+        'sitter_pz': 'Sitter Pz',
+        'mover_px': 'Mover Px',
+        'mover_py': 'Mover Py',
+        'mover_pz': 'Mover Pz',
     }
     
-    for i, param_name in enumerate(param_names):
-        ax = fig.add_subplot(n_rows + 1, n_cols, n_cols + 1 + i)
-        data = param_results[param_name]
-        pvals = data['values']
+    param_items = list(param_results.items())
+    
+    for i, (param_name, data) in enumerate(param_items):
+        row = 1 + i // n_cols
+        col = i % n_cols
+        ax = fig.add_subplot(gs[row, col])
         
-        for variant in ['t_only', 'h_then_t']:
-            fids = data[variant]
-            ax.scatter(pvals, fids, s=40, alpha=0.7, color=colors[variant],
-                      edgecolors='black', linewidth=0.5, label=labels[variant])
-            
-            # Fit exponential decay
-            if np.std(fids) > 0.01:
-                try:
-                    popt, _ = curve_fit(_exp_decay, pvals, fids, p0=[fids[0], 50], maxfev=10000)
-                    fit_x = np.linspace(pvals.min(), pvals.max(), 100)
-                    ax.plot(fit_x, _exp_decay(fit_x, *popt), '--', color=colors[variant],
-                           linewidth=1.5, alpha=0.7)
-                except (RuntimeError, ValueError):
-                    pass
+        param_values = data['values']
+        d3_fids = data['d3']
+        d5_fids = data['d5']
         
-        display_name = short_names.get(param_name, param_name)
-        ax.set_xlabel(display_name, fontsize=10, fontweight='bold')
-        ax.set_ylabel('Fidelity', fontsize=10)
-        ax.set_title(display_name, fontsize=10, fontweight='bold')
+        # d=3 scatter
+        ax.scatter(param_values, d3_fids, s=40, alpha=0.7, color='#e74c3c',
+                   edgecolors='black', linewidth=0.5, zorder=3, marker='o',
+                   label='d=3')
+        
+        # d=5 scatter
+        ax.scatter(param_values, d5_fids, s=40, alpha=0.7, color='#2980b9',
+                   edgecolors='black', linewidth=0.5, zorder=3, marker='s',
+                   label='d=5')
+        
+        # Fit exponential for both
+        if np.std(d3_fids) > 0.01:
+            try:
+                popt, _ = curve_fit(_exp_decay, param_values, d3_fids,
+                                   p0=[d3_fids[0], 50], maxfev=10000)
+                fit_x = np.linspace(param_values.min(), param_values.max(), 100)
+                ax.plot(fit_x, _exp_decay(fit_x, *popt), '-', color='#e74c3c',
+                       linewidth=1.5, alpha=0.5, zorder=2)
+            except (RuntimeError, ValueError):
+                pass
+        
+        if np.std(d5_fids) > 0.01:
+            try:
+                popt, _ = curve_fit(_exp_decay, param_values, d5_fids,
+                                   p0=[d5_fids[0], 50], maxfev=10000)
+                fit_x = np.linspace(param_values.min(), param_values.max(), 100)
+                ax.plot(fit_x, _exp_decay(fit_x, *popt), '-', color='#2980b9',
+                       linewidth=1.5, alpha=0.5, zorder=2)
+            except (RuntimeError, ValueError):
+                pass
+        
+        display_name = display_names.get(param_name, param_name)
+        ax.set_ylabel('Fidelity', fontsize=9)
+        ax.set_title(display_name, fontsize=10, fontweight='bold', pad=8)
         ax.set_ylim([0, 1.05])
         ax.grid(True, linestyle='--', alpha=0.3)
-        ax.legend(fontsize=8)
-        ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+        
+        # Format x-axis with proper scientific notation
+        ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0), useMathText=True)
+        ax.tick_params(axis='both', labelsize=8)
+        
+        # Only show legend on first param plot to avoid clutter
+        if i == 0:
+            ax.legend(fontsize=8, loc='upper right', framealpha=0.9)
     
+    # Add overall title
     model_suffix = " (TwoZone)" if _USE_TWO_ZONE else " (OneZone)"
-    plt.suptitle(f'Magic State Prep Comparison: Non-Magic vs Magic{model_suffix}', fontsize=14, fontweight='bold', y=0.99)
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.suptitle(f'd=3 [[7,1,3]] vs d=5 [[17,1,5]] Noise Comparison{model_suffix}', 
+                fontsize=14, fontweight='bold', y=0.98)
+    
+    # Adjust layout to prevent overlapping
+    plt.tight_layout(rect=[0, 0.02, 1, 0.95])
     
     return fig
 
@@ -963,26 +1130,22 @@ def plot_comparison(coeffs, scaling_results, param_results):
 # ============================================================================
 
 def main():
-    """Main execution routine for magic state prep comparison."""
+    """Main execution routine for d=3 vs d=5 comparison analysis."""
     global _USE_TWO_ZONE
     
     print("\n" + "="*80)
-    print("MAGIC STATE PREPARATION COMPARISON")
+    print("d=3 vs d=5 DISTILLATION FIDELITY COMPARISON")
     print("="*80)
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Model selection
     print("\nSelect noise model:")
-    print("  1. GeminiOneZoneNoiseModel (default)")
-    print("  2. GeminiTwoZoneNoiseModel (custom)")
+    print("  1. GeminiOneZoneNoiseModel (3 params: cz_unpaired)")
+    print("  2. GeminiTwoZoneNoiseModel (9 params: cz_unpaired + mover + sitter)")
     choice = input("Enter choice [1/2]: ").strip()
     _USE_TWO_ZONE = (choice == "2")
     
     print(f"\n✓ Using: {get_model_name()}")
-    
-    print("\nComparing:")
-    print("  • Non-Magic:  magicstateprep applies T gate only")
-    print("  • Magic:      magicstateprep applies H then T gate")
     
     # Configuration
     SCALING_COEFFS = np.linspace(0.1, 3.0, 25)
@@ -990,56 +1153,59 @@ def main():
     SHOTS_PER_TEST = 500
     
     noise_params = get_noise_params()
-    total_tests = 2 * len(SCALING_COEFFS) + 2 * len(noise_params) * PARAM_ITERATIONS
+    # 2 variants (d3, d5) × (scaling + param sweeps)
+    total_tests = 2 * (len(SCALING_COEFFS) + len(noise_params) * PARAM_ITERATIONS)
     
     print(f"\nConfiguration:")
+    print(f"  - Circuits compared:")
+    print(f"      d=3 [[7,1,3]] injection (7 qubits)")
+    print(f"      d=5 [[17,1,5]] injection (17 qubits)")
     print(f"  - Noise model: {get_model_name()}")
-    print(f"  - Scaling coefficients: {len(SCALING_COEFFS)} points × 2 variants")
+    print(f"  - Scaling coefficients: {len(SCALING_COEFFS)} points")
     print(f"  - Parameters to test: {noise_params}")
-    print(f"  - Iterations per parameter: {PARAM_ITERATIONS} × 2 variants")
+    print(f"  - Iterations per parameter: {PARAM_ITERATIONS}")
     print(f"  - Shots per test: {SHOTS_PER_TEST}")
     print(f"  - Parallel workers: {NUM_WORKERS}")
     print(f"  - Total simulations: {total_tests}")
     
-    # ---- ANALYSIS 1: Scaling Coefficient Comparison ----
+    # ---- ANALYSIS 1: Scaling Comparison ----
     print("\n" + "-"*80)
-    print("ANALYSIS 1: Scaling Coefficient Comparison")
+    print("ANALYSIS 1: Scaling Coefficient Comparison (d=3 vs d=5)")
     print("-"*80)
     
-    scaling_results = analyze_scaling_comparison(SCALING_COEFFS, shots=SHOTS_PER_TEST, verbose=True)
+    scaling_results = analyze_scaling_comparison(
+        SCALING_COEFFS, shots=SHOTS_PER_TEST, verbose=True
+    )
     
-    print("\n  Scaling Summary:")
-    for variant in ['t_only', 'h_then_t']:
-        fids = scaling_results[variant]
-        print(f"    {variant:10s}: min={fids.min():.4f}, max={fids.max():.4f}, mean={fids.mean():.4f}")
+    print(f"\n  Scaling Summary:")
+    print(f"    d=3: min={scaling_results['d3'].min():.4f}, max={scaling_results['d3'].max():.4f}, mean={scaling_results['d3'].mean():.4f}")
+    print(f"    d=5: min={scaling_results['d5'].min():.4f}, max={scaling_results['d5'].max():.4f}, mean={scaling_results['d5'].mean():.4f}")
     
-    # ---- ANALYSIS 2: Parameter Sweeps Comparison ----
+    # ---- ANALYSIS 2: Parameter Sweep Comparison ----
     print("\n" + "-"*80)
-    print("ANALYSIS 2: CZ Unpaired Gate Parameter Comparison")
+    print("ANALYSIS 2: Parameter Sweep Comparison (d=3 vs d=5)")
     print("-"*80)
     
-    param_results = analyze_params_comparison(iterations=PARAM_ITERATIONS, shots=SHOTS_PER_TEST, verbose=True)
+    param_results = analyze_params_comparison(
+        iterations=PARAM_ITERATIONS, shots=SHOTS_PER_TEST, verbose=True
+    )
     
-    print("\n  Parameter Summaries:")
-    for param_name in noise_params:
-        data = param_results[param_name]
-        print(f"    {param_name}:")
-        for variant in ['t_only', 'h_then_t']:
-            fids = data[variant]
-            drop = fids[0] - fids[-1]
-            print(f"      {variant:10s}: drop={drop:+.4f}")
+    print("\n  Parameter Comparison (fidelity drop):")
+    for param_name, data in param_results.items():
+        d3_drop = data['d3'][0] - data['d3'][-1]
+        d5_drop = data['d5'][0] - data['d5'][-1]
+        print(f"    {param_name}: d3={d3_drop:+.4f}, d5={d5_drop:+.4f}")
     
     # ---- VISUALIZATION ----
     print("\n" + "-"*80)
-    print("GENERATING VISUALIZATIONS")
+    print("GENERATING COMPARISON VISUALIZATIONS")
     print("-"*80)
     
-    fig = plot_comparison(SCALING_COEFFS, scaling_results, param_results)
+    fig = plot_comparison_results(scaling_results, param_results)
     
-    # Model-specific filenames
     model_suffix = "two_zone" if _USE_TWO_ZONE else "one_zone"
-    png_filename = f'magic_state_comparison_{model_suffix}.png'
-    json_filename = f'magic_state_comparison_{model_suffix}_results.json'
+    png_filename = f'd3_vs_d5_comparison_{model_suffix}.png'
+    json_filename = f'd3_vs_d5_comparison_{model_suffix}_results.json'
     
     fig.savefig(png_filename, dpi=150, bbox_inches='tight')
     print(f"✓ Saved: {png_filename}")
@@ -1051,6 +1217,11 @@ def main():
     
     results = {
         'timestamp': datetime.now().isoformat(),
+        'comparison': 'd3_vs_d5',
+        'circuits': {
+            'd3': '[[7,1,3]]_injection (7 qubits)',
+            'd5': '[[17,1,5]]_injection (17 qubits)',
+        },
         'noise_model': get_model_name(),
         'configuration': {
             'scaling_coefficients': len(SCALING_COEFFS),
@@ -1059,22 +1230,18 @@ def main():
             'parameters_tested': noise_params,
             'total_simulations': total_tests,
         },
-        'variants': {
-            't_only': 'Non-Magic: T gate only',
-            'h_then_t': 'Magic: H gate then T gate'
-        },
         'scaling_analysis': {
-            'coefficients': SCALING_COEFFS.tolist(),
-            't_only_fidelities': scaling_results['t_only'].tolist(),
-            'h_then_t_fidelities': scaling_results['h_then_t'].tolist(),
+            'coefficients': scaling_results['coeffs'].tolist(),
+            'd3_fidelities': scaling_results['d3'].tolist(),
+            'd5_fidelities': scaling_results['d5'].tolist(),
         },
         'parameter_analyses': {
             param_name: {
                 'values': data['values'].tolist(),
-                't_only_fidelities': data['t_only'].tolist(),
-                'h_then_t_fidelities': data['h_then_t'].tolist(),
-                't_only_drop': float(data['t_only'][0] - data['t_only'][-1]),
-                'h_then_t_drop': float(data['h_then_t'][0] - data['h_then_t'][-1]),
+                'd3_fidelities': data['d3'].tolist(),
+                'd5_fidelities': data['d5'].tolist(),
+                'd3_fidelity_drop': float(data['d3'][0] - data['d3'][-1]),
+                'd5_fidelity_drop': float(data['d5'][0] - data['d5'][-1]),
             }
             for param_name, data in param_results.items()
         },
@@ -1086,23 +1253,37 @@ def main():
     
     # ---- SUMMARY ----
     print("\n" + "="*80)
-    print("ANALYSIS COMPLETE")
+    print("COMPARISON ANALYSIS COMPLETE")
     print("="*80)
     
-    # Determine winner
-    t_only_mean = scaling_results['t_only'].mean()
-    h_then_t_mean = scaling_results['h_then_t'].mean()
+    print(f"\n📊 d=3 [[7,1,3]] (7 qubits) Results:")
+    print(f"    Scaling mean fidelity: {scaling_results['d3'].mean():.4f}")
+    print(f"    Scaling fidelity range: [{scaling_results['d3'].min():.4f}, {scaling_results['d3'].max():.4f}]")
     
-    print(f"\n📊 Comparison Results:")
-    print(f"    Non-Magic mean fidelity:  {t_only_mean:.4f}")
-    print(f"    Magic mean fidelity:      {h_then_t_mean:.4f}")
+    print(f"\n📊 d=5 [[17,1,5]] (17 qubits) Results:")
+    print(f"    Scaling mean fidelity: {scaling_results['d5'].mean():.4f}")
+    print(f"    Scaling fidelity range: [{scaling_results['d5'].min():.4f}, {scaling_results['d5'].max():.4f}]")
     
-    if t_only_mean > h_then_t_mean:
-        print(f"\n✅ Non-Magic performs better by {(t_only_mean - h_then_t_mean)*100:.2f}%")
-    elif h_then_t_mean > t_only_mean:
-        print(f"\n✅ Magic performs better by {(h_then_t_mean - t_only_mean)*100:.2f}%")
+    # Comparison summary
+    d3_avg = scaling_results['d3'].mean()
+    d5_avg = scaling_results['d5'].mean()
+    diff = d5_avg - d3_avg
+    print(f"\n📈 Comparison:")
+    print(f"    Mean fidelity difference (d5 - d3): {diff:+.4f}")
+    if diff > 0:
+        print(f"    → d=5 [[17,1,5]] shows HIGHER average fidelity")
+    elif diff < 0:
+        print(f"    → d=3 [[7,1,3]] shows HIGHER average fidelity")
     else:
-        print(f"\n🔄 Both methods perform equally")
+        print(f"    → Both circuits show EQUAL average fidelity")
+    
+    # Find most sensitive parameter for each
+    d3_sens = {name: abs(data['d3'][0] - data['d3'][-1]) for name, data in param_results.items()}
+    d5_sens = {name: abs(data['d5'][0] - data['d5'][-1]) for name, data in param_results.items()}
+    d3_most = max(d3_sens, key=d3_sens.get)
+    d5_most = max(d5_sens, key=d5_sens.get)
+    print(f"\n    Most sensitive param (d3): {d3_most} (drop={d3_sens[d3_most]:.4f})")
+    print(f"    Most sensitive param (d5): {d5_most} (drop={d5_sens[d5_most]:.4f})")
     
     plt.show()
     

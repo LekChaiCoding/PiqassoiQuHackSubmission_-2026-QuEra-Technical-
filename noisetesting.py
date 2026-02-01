@@ -44,7 +44,7 @@ Swap = Tuple[Slot, Slot]
 
 ## MODIFICATION: COPIED FROM BLOQADE CIRCUIT(https://github.com/QuEraComputing/bloqade-circuit/tree/main), MODIFICATIONSADDED BY TEAM PIQASSO, NOT IN ORIGINAL REPOSITORY
 ## MODIFICATION: PRINT STATEMENTS FOR UNIT TESTING HAVE BEEN ADDED
-## DISCLAIMER: COPIED FROM bloqade-circuit/src/circ_utils/noise/_two_zone_utils.py, model.py, transform.py
+
 def get_equivalent_swaps_greedy(source, target): ##MODIFICATION: ADDED BY TEAM PIQASSO, NOT IN ORIGINAL REPOSITORY
     """Greedy algorithm to find swaps that transform source configuration to target."""
     src = _expand(source)
