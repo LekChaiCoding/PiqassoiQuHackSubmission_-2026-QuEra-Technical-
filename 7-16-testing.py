@@ -587,23 +587,16 @@ def d3_circuit():
 
 
 # ============================================================================
-# D=5 [[17,1,5]] CIRCUIT DEFINITIONS (from d5_piqasso_16_qubits.py)
+# D=5 [[17,1,5]] CIRCUIT DEFINITIONS (from syndrome_d5.ipynb)
 # ============================================================================
 
 @squin.kernel
-def prepare_magic_d5(q):
-    """Prepare magic state |T⟩ = H|0⟩ then T."""
-    squin.h(q)
-    squin.t(q)
-
-
-@squin.kernel
 def d5_injection(q: ilist.IList[Qubit, Literal[17]]):
-    """d=5 [[17,1,5]] encoding with magic state injection."""
-    # Magic state on center qubit
-    prepare_magic_d5(q[7])
+    """d=5 [[17,1,5]] encoding with magic state injection (Bloqade SQUIN)."""
+    # Magic state on center qubit q[7]
+    squin.t(q[7])
     
-    # √Y on all ancillas (not q[7])
+    # √Y on all ancillas (skip q[7] which has magic state)
     squin.ry(pi/2, q[0])
     squin.ry(pi/2, q[1])
     squin.ry(pi/2, q[2])
@@ -611,7 +604,7 @@ def d5_injection(q: ilist.IList[Qubit, Literal[17]]):
     squin.ry(pi/2, q[4])
     squin.ry(pi/2, q[5])
     squin.ry(pi/2, q[6])
-    # skip q[7] - has magic state
+    # q[7] skipped - has magic state
     squin.ry(pi/2, q[8])
     squin.ry(pi/2, q[9])
     squin.ry(pi/2, q[10])
@@ -624,7 +617,6 @@ def d5_injection(q: ilist.IList[Qubit, Literal[17]]):
     
     # CZ Layer 1
     squin.cz(q[1], q[3])
-    squin.cz(q[3], q[10])
     squin.cz(q[7], q[10])
     squin.cz(q[12], q[14])
     squin.cz(q[13], q[16])
@@ -644,14 +636,25 @@ def d5_injection(q: ilist.IList[Qubit, Literal[17]]):
     squin.ry(-pi/2, q[10])
     squin.ry(-pi/2, q[14])
     squin.ry(-pi/2, q[16])
-    
+
     # CZ Layer 3
     squin.cz(q[2], q[4])
     squin.cz(q[6], q[8])
     squin.cz(q[7], q[9])
     squin.cz(q[10], q[13])
     squin.cz(q[14], q[16])
+
+    # √Y Layer 2
+    for i in (3, 6, 9, 10, 12, 13):
+        squin.ry(pi/2, q[i])
     
+    # CZ Layer 4
+    squin.cz(q[0], q[2])
+    squin.cz(q[3], q[6])
+    squin.cz(q[5], q[8])
+    squin.cz(q[10], q[12])
+    squin.cz(q[11], q[13])
+
     # Final √Y
     squin.ry(pi/2, q[1])
     squin.ry(pi/2, q[2])
@@ -682,20 +685,87 @@ def d5_injection(q: ilist.IList[Qubit, Literal[17]]):
     squin.ry(-pi/2, q[10])
     squin.ry(-pi/2, q[12])
 
+    # Final single-qubit gates
+    squin.z(q[8])
+    squin.z(q[14])
+    squin.z(q[15])
+    squin.z(q[1])
+    squin.x(q[5])
+    squin.x(q[8])
+    squin.x(q[14])
+
+
+@squin.kernel
+def svntn_encode_zero_on(q: ilist.IList[Qubit, Literal[17]]):
+    """Encode |0⟩^17 → |0⟩_L on the 17-qubit register q (2D [[17,1,5]])."""
+    for i in (1, 2, 4, 13, 14, 9, 10, 15):
+        squin.h(q[i])
+    squin.cx(q[1], q[8])
+    squin.cx(q[9], q[0])
+    squin.cx(q[0], q[3])
+    squin.cx(q[4], q[5])
+    squin.cx(q[13], q[6])
+    squin.cx(q[14], q[11])
+    squin.cx(q[4], q[1])
+    squin.cx(q[15], q[16])
+    squin.cx(q[10], q[13])
+    squin.cx(q[6], q[7])
+    squin.cx(q[2], q[8])
+    squin.cx(q[0], q[12])
+    squin.cx(q[3], q[7])
+    squin.cx(q[8], q[9])
+    squin.cx(q[15], q[12])
+    squin.cx(q[0], q[5])
+    squin.cx(q[10], q[15])
+    squin.cx(q[7], q[1])
+    squin.cx(q[12], q[14])
+    squin.cx(q[1], q[3])
+    squin.cx(q[7], q[13])
+    squin.cx(q[10], q[14])
+    squin.cx(q[2], q[0])
+    squin.cx(q[11], q[13])
+    squin.cx(q[11], q[16])
+
+
+@squin.kernel
+def svntn_encode_plus_on(q: ilist.IList[Qubit, Literal[17]]):
+    """Encode 17 qubits as |+⟩_L: first |0⟩_L then transversal H."""
+    svntn_encode_zero_on(q)
+    for i in range(17):
+        squin.h(q[i])
+
 
 @squin.kernel
 def d5_circuit():
     """
-    Full d=5 circuit with injection and measurement.
-    Uses 17 qubits for the [[17,1,5]] code.
+    Full d=5 [[17,1,5]] A3 circuit - Fault-tolerant syndrome extraction.
+    Uses 51 qubits total: 17 data + 17 X-ancilla + 17 Z-ancilla.
     """
-    q = squin.qalloc(17)
+    q = squin.qalloc(51)
     
-    # Apply d=5 injection
+    # Apply d=5 injection to data qubits
     d5_injection(q[0:17])
     
-    # Measure all qubits
+    # Prepare ancilla as |+⟩_L for X-stabilizer syndrome extraction
+    svntn_encode_plus_on(q[17:34])
+
+    # CNOTs: data → ancilla (X-syndrome extraction)
     for i in range(17):
+        squin.cx(q[i], q[i+17])
+    
+    # Prepare ancilla as |0⟩_L for Z-stabilizer syndrome extraction
+    svntn_encode_zero_on(q[34:51])
+
+    # CNOTs: ancilla → data (Z-syndrome extraction)
+    for i in range(17):
+        squin.cx(q[i+34], q[i])
+
+    # Transversal H on Z-ancilla
+    for i in range(17):
+        squin.h(q[i+34])
+    
+    # Measure ancilla qubits (syndrome bits)
+    for i in range(17, 51):
         squin.measure(q[i])
 
 
@@ -705,6 +775,18 @@ def d5_circuit():
 
 # Syndrome indices for Steane [[7,1,3]] code (d=3)
 SYND_INDICES_D3 = [[1, 3, 5, 7], [4, 5, 6, 7], [2, 3, 6, 7]]
+
+# Syndrome indices for [[17,1,5]] code (d=5)
+SYND_DICT_D5 = {
+    1: [0, 4, 5, 2],
+    2: [6, 7, 9, 8],
+    3: [11, 13, 16, 14],
+    4: [1, 0, 2, 3],
+    5: [4, 7, 6, 5],
+    6: [10, 11, 14, 12],
+    7: [3, 2, 5, 6, 8, 13, 11, 10],
+    8: [12, 14, 16, 15]
+}
 
 
 def _check_syndrome(bits, indices):
@@ -725,30 +807,56 @@ def find_good_rate_d3(samples):
     return good / len(samples)
 
 
+def _to_parity(li):
+    """Convert boolean list to parity values (-1 or 1)."""
+    return [-2 * el + 1 for el in li]
+
+
+def _find_syndrome_d5(li, idx):
+    """Check if syndrome is triggered for d=5 code."""
+    li = _to_parity(li)
+    mult = 1
+    for ind in idx:
+        mult *= li[ind]
+    return mult == 1
+
+
+def _find_z_syndrome_d5(sample, idx):
+    """Find Z syndrome for d=5 from sample."""
+    sample_z = sample[0:17]
+    return _find_syndrome_d5(sample_z, idx)
+
+
+def _find_x_syndrome_d5(sample, idx):
+    """Find X syndrome for d=5 from sample."""
+    sample_x = sample[17:34]
+    return _find_syndrome_d5(sample_x, idx)
+
+
+def _compute_syndromes_d5(sample, ind_dict):
+    """Compute all X and Z syndromes for d=5 code."""
+    x_synds = []
+    z_synds = []
+    for key in list(ind_dict.keys()):
+        idx = ind_dict[key]
+        x_synds.append(_find_x_syndrome_d5(sample, idx))
+        z_synds.append(_find_z_syndrome_d5(sample, idx))
+    return x_synds, z_synds
+
+
 def find_good_rate_d5(samples):
     """
-    Calculate fidelity for d=5 circuit.
-    
-    For the d=5 [[17,1,5]] code injection, we check for consistency
-    in the measured bit patterns based on CZ gate correlations.
+    Calculate fidelity for d=5 [[17,1,5]] circuit.
+    Checks that all 16 syndromes (8 X + 8 Z) are triggered.
     """
     samples = np.asarray(samples)
-    n_samples = len(samples)
-    
-    good = 0
+    good_samples = 0
     for sample in samples:
-        # Check parity relationships from the CZ structure
-        p1 = (sample[1] ^ sample[3] ^ sample[10]) % 2
-        p2 = (sample[7] ^ sample[10]) % 2
-        p3 = (sample[12] ^ sample[14]) % 2
-        p4 = (sample[4] ^ sample[7]) % 2
-        p5 = (sample[6] ^ sample[8] ^ sample[9]) % 2
-        
-        parity_sum = p1 + p2 + p3 + p4 + p5
-        if parity_sum <= 2:
-            good += 1
-    
-    return good / n_samples
+        synd = _compute_syndromes_d5(sample, SYND_DICT_D5)
+        # All 16 syndromes should be True (nonzero count == 16)
+        will_add = 1 if np.count_nonzero(synd) == 16 else 0
+        good_samples += will_add
+    return good_samples / len(samples)
 
 
 # ============================================================================
@@ -1158,8 +1266,8 @@ def main():
     
     print(f"\nConfiguration:")
     print(f"  - Circuits compared:")
-    print(f"      d=3 [[7,1,3]] injection (7 qubits)")
-    print(f"      d=5 [[17,1,5]] injection (17 qubits)")
+    print(f"      d=3 [[7,1,3]] injection (21 qubits: 7 data + 14 ancilla)")
+    print(f"      d=5 [[17,1,5]] injection (51 qubits: 17 data + 34 ancilla)")
     print(f"  - Noise model: {get_model_name()}")
     print(f"  - Scaling coefficients: {len(SCALING_COEFFS)} points")
     print(f"  - Parameters to test: {noise_params}")
@@ -1219,8 +1327,8 @@ def main():
         'timestamp': datetime.now().isoformat(),
         'comparison': 'd3_vs_d5',
         'circuits': {
-            'd3': '[[7,1,3]]_injection (7 qubits)',
-            'd5': '[[17,1,5]]_injection (17 qubits)',
+            'd3': '[[7,1,3]]_injection (21 qubits: 7 data + 14 ancilla)',
+            'd5': '[[17,1,5]]_injection (51 qubits: 17 data + 34 ancilla)',
         },
         'noise_model': get_model_name(),
         'configuration': {
@@ -1256,11 +1364,11 @@ def main():
     print("COMPARISON ANALYSIS COMPLETE")
     print("="*80)
     
-    print(f"\n📊 d=3 [[7,1,3]] (7 qubits) Results:")
+    print(f"\n📊 d=3 [[7,1,3]] (21 qubits: 7 data + 14 ancilla) Results:")
     print(f"    Scaling mean fidelity: {scaling_results['d3'].mean():.4f}")
     print(f"    Scaling fidelity range: [{scaling_results['d3'].min():.4f}, {scaling_results['d3'].max():.4f}]")
     
-    print(f"\n📊 d=5 [[17,1,5]] (17 qubits) Results:")
+    print(f"\n📊 d=5 [[17,1,5]] (51 qubits: 17 data + 34 ancilla) Results:")
     print(f"    Scaling mean fidelity: {scaling_results['d5'].mean():.4f}")
     print(f"    Scaling fidelity range: [{scaling_results['d5'].min():.4f}, {scaling_results['d5'].max():.4f}]")
     
