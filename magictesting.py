@@ -862,14 +862,10 @@ def _r_squared(y_true, y_pred):
     return 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
 
 
-def plot_comparison(coeffs, scaling_results, param_results):
-    """Create comparison plots for both magic state prep variants."""
+def plot_comparison(coeffs, scaling_results, param_results=None):
+    """Create comparison plot for scaling factor only."""
     
-    n_params = len(param_results)
-    n_cols = min(n_params, 3)
-    n_rows = (n_params + n_cols - 1) // n_cols  # Ceiling division
-    
-    fig = plt.figure(figsize=(16, 5 + 4 * n_rows))
+    fig, ax = plt.subplots(figsize=(10, 6))
     
     # Color scheme
     colors = {
@@ -881,79 +877,31 @@ def plot_comparison(coeffs, scaling_results, param_results):
         'h_then_t': 'Magic'
     }
     
-    # ---- Top Plot: Scaling Coefficient Comparison ----
-    ax_top = fig.add_subplot(n_rows + 1, 1, 1)
-    
     for variant in ['t_only', 'h_then_t']:
         fids = scaling_results[variant]
-        ax_top.scatter(coeffs, fids, s=60, alpha=0.7, color=colors[variant],
-                      edgecolors='black', linewidth=0.5, label=f'{labels[variant]} (data)')
+        ax.scatter(coeffs, fids, s=60, alpha=0.7, color=colors[variant],
+                  edgecolors='black', linewidth=0.5, label=f'{labels[variant]} (data)')
         
         # Fit exponential decay
         try:
             popt, _ = curve_fit(_exp_decay, coeffs, fids, p0=[fids[0], 0.5], maxfev=10000)
             fit_x = np.linspace(coeffs.min(), coeffs.max(), 100)
             r2 = _r_squared(fids, _exp_decay(coeffs, *popt))
-            ax_top.plot(fit_x, _exp_decay(fit_x, *popt), '--', color=colors[variant],
-                       linewidth=2, alpha=0.8, 
-                       label=f'{labels[variant]}: {popt[0]:.3f}·e^(-{popt[1]:.3f}c) [R²={r2:.3f}]')
+            ax.plot(fit_x, _exp_decay(fit_x, *popt), '--', color=colors[variant],
+                   linewidth=2, alpha=0.8, 
+                   label=f'{labels[variant]}: {popt[0]:.3f}·e^(-{popt[1]:.3f}c) [R²={r2:.3f}]')
         except (RuntimeError, ValueError):
             pass
     
-    ax_top.set_xlabel('Scaling Coefficient', fontsize=11, fontweight='bold')
-    ax_top.set_ylabel('Fidelity', fontsize=11, fontweight='bold')
-    ax_top.set_title(f'Scaling Coefficient: Non-Magic vs Magic ({get_model_name()})', fontsize=12, fontweight='bold')
-    ax_top.set_ylim([0, 1.05])
-    ax_top.grid(True, linestyle='--', alpha=0.4)
-    ax_top.legend(fontsize=9, loc='best')
-    
-    # ---- Bottom Plots: Parameter Sweeps ----
-    param_names = list(param_results.keys())
-    # Shorten parameter names for display
-    short_names = {
-        'cz_unpaired_gate_px': 'cz_up_px',
-        'cz_unpaired_gate_py': 'cz_up_py',
-        'cz_unpaired_gate_pz': 'cz_up_pz',
-        'sitter_px': 'sit_px',
-        'sitter_py': 'sit_py',
-        'sitter_pz': 'sit_pz',
-        'mover_px': 'mov_px',
-        'mover_py': 'mov_py',
-        'mover_pz': 'mov_pz',
-    }
-    
-    for i, param_name in enumerate(param_names):
-        ax = fig.add_subplot(n_rows + 1, n_cols, n_cols + 1 + i)
-        data = param_results[param_name]
-        pvals = data['values']
-        
-        for variant in ['t_only', 'h_then_t']:
-            fids = data[variant]
-            ax.scatter(pvals, fids, s=40, alpha=0.7, color=colors[variant],
-                      edgecolors='black', linewidth=0.5, label=labels[variant])
-            
-            # Fit exponential decay
-            if np.std(fids) > 0.01:
-                try:
-                    popt, _ = curve_fit(_exp_decay, pvals, fids, p0=[fids[0], 50], maxfev=10000)
-                    fit_x = np.linspace(pvals.min(), pvals.max(), 100)
-                    ax.plot(fit_x, _exp_decay(fit_x, *popt), '--', color=colors[variant],
-                           linewidth=1.5, alpha=0.7)
-                except (RuntimeError, ValueError):
-                    pass
-        
-        display_name = short_names.get(param_name, param_name)
-        ax.set_xlabel(display_name, fontsize=10, fontweight='bold')
-        ax.set_ylabel('Fidelity', fontsize=10)
-        ax.set_title(display_name, fontsize=10, fontweight='bold')
-        ax.set_ylim([0, 1.05])
-        ax.grid(True, linestyle='--', alpha=0.3)
-        ax.legend(fontsize=8)
-        ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
-    
+    ax.set_xlabel('Scaling Coefficient', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Fidelity', fontsize=12, fontweight='bold')
     model_suffix = " (TwoZone)" if _USE_TWO_ZONE else " (OneZone)"
-    plt.suptitle(f'Magic State Prep Comparison: Non-Magic vs Magic{model_suffix}', fontsize=14, fontweight='bold', y=0.99)
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    ax.set_title(f'Scaling Factor: Non-Magic vs Magic{model_suffix}', fontsize=14, fontweight='bold')
+    ax.set_ylim([0, 1.05])
+    ax.grid(True, linestyle='--', alpha=0.4)
+    ax.legend(fontsize=10, loc='best')
+    
+    plt.tight_layout()
     
     return fig
 
