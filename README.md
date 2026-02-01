@@ -11,6 +11,11 @@ Here you will learn all the details about the challenge, and needed to operate Q
 This repo contains everything you need to get going. Mainly:
 
 - [`challenge.md`](challenge.md) contains the challenge statement, with directions and guidelines
+- **Noise analysis script** ([`noise_testing_flagged.py`](noise_testing_flagged.py)): compares the A3 QEC circuit with and without flag qubits under several noise models. Run with `python noise_testing_flagged.py`. It uses three noise model types so we can see how flagging behaves under different kinds of errors:
+  1. **GeminiOneZone** — one set of Pauli error rates scaled by a factor (realistic device-style baseline).
+  2. **GeminiTwoZone** — separate error rates for “sitter” (storage) vs “mover” (transport) qubits (realistic for neutral-atom hardware with shuttling).
+  3. **SymmetricPauli** — only uniform X/Y/Z errors (depolarizing-style); standard theoretical benchmark for QEC.
+- **GPU scan** ([`scan_gpu.py`](scan_gpu.py)): reports GPUs visible to CuPy (and optionally PyTorch / nvidia-smi). Run `python scan_gpu.py` to verify your GPU is detected.
 - Inside the `assets` folder you'll find
   - slide decks expanding on the topics from the Friday tutorial, including some basic information about error correction
   - images of interest that summarize the circuits you will be studying
