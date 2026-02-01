@@ -13,18 +13,16 @@ The original d=3 injection uses:
 For d=5, we scale this pattern to 17 qubits following the lattice structure.
 """
 
+from typing import Literal
 import numpy as np
+from bloqade import squin
+from bloqade.types import Qubit
+from kirin.dialects import ilist
 from math import pi
-
-try:
-    from bloqade import squin
-    import bloqade.tsim
-    from bloqade.cirq_utils import load_circuit
-    from bloqade.cirq_utils.emit import emit_circuit
-    BLOQADE_AVAILABLE = True
-except ImportError:
-    BLOQADE_AVAILABLE = False
-    print("Bloqade not available - using NumPy")
+import bloqade.stim
+import bloqade.tsim
+from bloqade.cirq_utils import load_circuit
+from bloqade.cirq_utils.emit import emit_circuit
 
 
 class QSim:
