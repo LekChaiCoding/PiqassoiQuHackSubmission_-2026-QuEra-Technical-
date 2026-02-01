@@ -13,14 +13,14 @@ Features:
 """
 
 from bloqade import squin
-from bloqade.types import Qubit
 from kirin.dialects import ilist
 from bloqade.cirq_utils import load_circuit, emit_circuit, noise
-import bloqade.stim
+from bloqade.types import Qubit
+import cirq
 import numpy as np
 from math import pi
 import matplotlib.pyplot as plt
-from typing import Literal
+from typing import Literal, Optional, Dict, List, Tuple
 import json
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -31,49 +31,39 @@ from scipy.optimize import curve_fit
 NUM_WORKERS = min(os.cpu_count() or 4, 10)
 
 
-# ============================================================================
-# CIRCUIT DEFINITIONS (from a3.ipynb)
-# ============================================================================
-
+# =============================================================================
+# CIRCUIT DEFINITIONS (Bloqade squin kernels)
+# =============================================================================
 @squin.kernel
 def magicstateprep(qubits, ind):
-    #squin.h(qubits[ind])
+    """Prepare magic state with T gate."""
     squin.t(qubits[ind])
 
 
 @squin.kernel
 def injection(q: ilist.IList[Qubit, Literal[7]]):
-    """Apply magic-state injection to the 7-qubit register `q` (allocated by caller)."""
+    """Apply magic-state injection to the 7-qubit register."""
     squin.reset(q[0:2])
     squin.reset(q[3:7])
     magicstateprep(q, 2)
-    # ry(-pi/2) on old 0..5  ->  new [3,1,0,6,4,5]
+    
     for j in (3, 1, 0, 6, 4, 5):
         squin.ry(-pi / 2, q[j])
 
-    # cz(1,2), cz(3,4), cz(5,6) -> cz(1,0), cz(6,4), cz(5,2)
     squin.cz(q[1], q[0])
     squin.cz(q[6], q[4])
     squin.cz(q[5], q[2])
-
-    # ry on old 6 -> new 2
     squin.ry(pi / 2, q[2])
-
-    # cz(0,3), cz(2,5), cz(4,6) -> cz(3,6), cz(0,5), cz(4,2)
     squin.cz(q[3], q[6])
     squin.cz(q[0], q[5])
     squin.cz(q[4], q[2])
 
-    # ry on old 2..6 -> new [0,6,4,5,2]
     for j in (0, 6, 4, 5, 2):
         squin.ry(pi / 2, q[j])
 
-    # cz(0,1), cz(2,3), cz(4,5) -> cz(3,1), cz(0,6), cz(4,5)
     squin.cz(q[3], q[1])
     squin.cz(q[0], q[6])
     squin.cz(q[4], q[5])
-
-    # final single-qubit ry: old 1 -> 1, old 2 -> 0, old 4 -> 4
     squin.ry(pi / 2, q[1])
     squin.ry(pi / 2, q[0])
     squin.ry(pi / 2, q[4])
@@ -85,7 +75,7 @@ def injection(q: ilist.IList[Qubit, Literal[7]]):
 
 @squin.kernel
 def steane_encode_zero_on(q: ilist.IList[Qubit, Literal[7]]):
-    """Encode |0⟩^7 → |0⟩_L on the 7-qubit register q (Steane [[7,1,3]])."""
+    """Encode logical |0⟩_L on 7 qubits (Steane [[7,1,3]] code)."""
     squin.h(q[0])
     squin.h(q[1])
     squin.h(q[3])
@@ -101,7 +91,7 @@ def steane_encode_zero_on(q: ilist.IList[Qubit, Literal[7]]):
 
 @squin.kernel
 def steane_encode_plus_on(q: ilist.IList[Qubit, Literal[7]]):
-    """Encode 7 qubits as |+⟩_L: first |0⟩_L then transversal H."""
+    """Encode logical |+⟩_L: first encode |0⟩_L, then apply transversal H."""
     steane_encode_zero_on(q)
     for i in range(7):
         squin.h(q[i])
@@ -859,7 +849,7 @@ def main():
         json.dump(results, f, indent=2)
     print("✓ Saved: qec_analysis_results.json")
     
-    print("\n" + "="*80)
+    print(f"\n{'='*70}")
     print("ANALYSIS COMPLETE")
     print("="*80)
     print(f"\n📊 Analyzed {MAX_ROUNDS} QEC rounds × {len(SCALING_RANGE_HEATMAP)} noise levels")
