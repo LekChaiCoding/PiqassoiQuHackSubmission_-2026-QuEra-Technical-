@@ -153,21 +153,21 @@ _cached_circuit = None
 
 def _check_syndrome(bits, indices):
     """Check if syndrome is triggered (product of parities == 1)."""
-    parity = 1
-    for i in indices:
-        parity *= (1 - 2 * bits[i - 1])
+    # Convert bits to ±1 and compute product
+    parity = np.prod(1 - 2 * bits[np.array(indices) - 1])
     return parity == 1
 
 
 def find_good_rate(samples):
     """Calculate fidelity: fraction of samples with all 6 syndromes triggered."""
+    samples = np.asarray(samples)
     good = 0
     for sample in samples:
-        x_bits, z_bits = sample[0:7], sample[7:14]
+        x_bits, z_bits = sample[:7], sample[7:14]
+        # Count triggered syndromes (need all 6)
         count = sum(_check_syndrome(x_bits, idx) for idx in SYND_INDICES)
         count += sum(_check_syndrome(z_bits, idx) for idx in SYND_INDICES)
-        if count == 6:
-            good += 1
+        good += (count == 6)
     return good / len(samples)
 
 
@@ -240,14 +240,14 @@ def analyze_scaling_coefficients(coeff_range=None, shots=500, verbose=True):
 # ANALYSIS 2: Custom Noise Parameter Iteration
 # ============================================================================
 
-# All noise parameters that GeminiOneZoneNoiseModel accepts
+# All noise parameters that GeminiOneZoneNoiseModel accepts (15 total)
+# Note: sitter_* and mover_* are only for GeminiTwoZoneNoiseModel
 _NOISE_PARAMS = [
     'global_px', 'global_py', 'global_pz',
     'local_px', 'local_py', 'local_pz',
     'local_unaddressed_px', 'local_unaddressed_py', 'local_unaddressed_pz',
     'cz_paired_gate_px', 'cz_paired_gate_py', 'cz_paired_gate_pz',
-    'cz_unpaired_gate_px', 'cz_unpaired_gate_py', 'cz_unpaired_gate_pz', 'sitter_px', 
-    'sitter_py', 'sitter_pz', 'mover_px', 'mover_py', 'mover_pz',
+    'cz_unpaired_gate_px', 'cz_unpaired_gate_py', 'cz_unpaired_gate_pz',
 ]
 
 
@@ -321,7 +321,14 @@ def _r_squared(y_true, y_pred):
 
 
 def plot_individual_analyses(coeffs, scaling_fidelities, all_param_results):
-    """Create detailed plots: scaling analysis + grid of all parameter sweeps."""
+    """Create detailed plots: scaling analysis + grid of all parameter sweeps.
+    
+    Args:
+        coeffs: Array of scaling coefficients tested
+        scaling_fidelities: Array of fidelities for each scaling coefficient
+        all_param_results: Either dict {param_name: (values, fidelities)} or 
+                          list of (param_name, values, fidelities) tuples
+    """
     n_params = len(all_param_results)
     n_cols = 4
     n_rows = (n_params + n_cols - 1) // n_cols  # Ceiling division
@@ -357,8 +364,8 @@ def plot_individual_analyses(coeffs, scaling_fidelities, all_param_results):
             fit_results.append((name, r2))
             ax_top.plot(fit_x, func(fit_x, *popt), ls, color=color, linewidth=2,
                        alpha=0.8, label=f'{name}: {label_fn(popt)} [R²={r2:.3f}]', zorder=4)
-        except:
-            pass
+        except (RuntimeError, ValueError, TypeError):
+            pass  # Curve fit failed, skip this fit type
     
     if fit_results:
         best = max(fit_results, key=lambda x: x[1])
@@ -374,9 +381,15 @@ def plot_individual_analyses(coeffs, scaling_fidelities, all_param_results):
     # ---- Grid of Parameter Sweeps ----
     colors = ['#e74c3c', '#3498db', '#27ae60', '#f39c12', '#9b59b6',
               '#1abc9c', '#e67e22', '#34495e', '#16a085', '#c0392b',
-              '#2980b9', '#8e44ad', '#d35400', '#27ae60', '#7f8c8d']
+              '#2980b9', '#8e44ad', '#d35400', '#2c3e50', '#7f8c8d']
     
-    for i, (param_name, param_values, fidelities) in enumerate(all_param_results):
+    # Handle both dict and list of tuples input
+    if isinstance(all_param_results, dict):
+        param_items = [(name, *data) for name, data in all_param_results.items()]
+    else:
+        param_items = all_param_results
+    
+    for i, (param_name, param_values, fidelities) in enumerate(param_items):
         ax = fig.add_subplot(n_rows + 1, n_cols, n_cols + 1 + i)
         color = colors[i % len(colors)]
         
@@ -391,8 +404,8 @@ def plot_individual_analyses(coeffs, scaling_fidelities, all_param_results):
                 fit_x = np.linspace(param_values.min(), param_values.max(), 100)
                 ax.plot(fit_x, _exp_decay(fit_x, *popt), '-', color='black',
                        linewidth=1.5, alpha=0.7, zorder=2)
-            except:
-                pass
+            except (RuntimeError, ValueError):
+                pass  # Curve fit failed, skip fitting line
         
         # Shorten parameter name for title: remove common prefixes, use abbreviations
         short_name = param_name.replace('local_unaddressed_', 'lu_').replace('cz_unpaired_gate_', 'cz_up_').replace('cz_paired_gate_', 'cz_pr_').replace('global_', 'g_').replace('local_', 'l_')
