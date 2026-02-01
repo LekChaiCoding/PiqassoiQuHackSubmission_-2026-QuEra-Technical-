@@ -198,7 +198,8 @@ def run_simulation_with_noise(noise_model, shots=1000):
 def _run_scaling_test(args):
     """Worker function for parallel scaling coefficient tests."""
     coeff, shots = args
-    noise_model = noise.GeminiOneZoneNoiseModel(scaling_factor=coeff)
+    NoiseModelClass = get_noise_model_class()
+    noise_model = NoiseModelClass(scaling_factor=coeff)
     return coeff, run_simulation_with_noise(noise_model, shots=shots)
 
 
@@ -240,9 +241,8 @@ def analyze_scaling_coefficients(coeff_range=None, shots=500, verbose=True):
 # ANALYSIS 2: Custom Noise Parameter Iteration
 # ============================================================================
 
-# All noise parameters that GeminiOneZoneNoiseModel accepts (15 total)
-# Note: sitter_* and mover_* are only for GeminiTwoZoneNoiseModel
-_NOISE_PARAMS = [
+# Base noise parameters (shared by both OneZone and TwoZone models)
+_BASE_NOISE_PARAMS = [
     'global_px', 'global_py', 'global_pz',
     'local_px', 'local_py', 'local_pz',
     'local_unaddressed_px', 'local_unaddressed_py', 'local_unaddressed_pz',
@@ -250,16 +250,47 @@ _NOISE_PARAMS = [
     'cz_unpaired_gate_px', 'cz_unpaired_gate_py', 'cz_unpaired_gate_pz',
 ]
 
+# Additional parameters only for GeminiTwoZoneNoiseModel
+_TWO_ZONE_EXTRA_PARAMS = [
+    'sitter_px', 'sitter_py', 'sitter_pz',
+    'mover_px', 'mover_py', 'mover_pz',
+]
 
-# Pre-built zero params dict (avoid rebuilding every call)
-_ZERO_PARAMS = {p: 0.0 for p in _NOISE_PARAMS}
+# Will be set based on user selection
+_NOISE_PARAMS = _BASE_NOISE_PARAMS.copy()
+_USE_TWO_ZONE = False
+
+
+def get_noise_params():
+    """Get the appropriate noise parameters based on selected model."""
+    if _USE_TWO_ZONE:
+        return _BASE_NOISE_PARAMS + _TWO_ZONE_EXTRA_PARAMS
+    return _BASE_NOISE_PARAMS
+
+
+def get_zero_params():
+    """Get zero params dict for the selected model."""
+    return {p: 0.0 for p in get_noise_params()}
+
+
+def get_noise_model_class():
+    """Get the appropriate noise model class."""
+    if _USE_TWO_ZONE:
+        return noise.GeminiTwoZoneNoiseModel
+    return noise.GeminiOneZoneNoiseModel
+
+
+def get_model_name():
+    """Get the display name of the current model."""
+    return "GeminiTwoZoneNoiseModel" if _USE_TWO_ZONE else "GeminiOneZoneNoiseModel"
 
 def _run_custom_param_test(args):
     """Worker function for parallel custom parameter tests."""
     param_name, param_val, shots = args
-    params = _ZERO_PARAMS.copy()
+    params = get_zero_params()
     params[param_name] = param_val
-    noise_model = noise.GeminiOneZoneNoiseModel(**params)
+    NoiseModelClass = get_noise_model_class()
+    noise_model = NoiseModelClass(**params)
     return (param_name, param_val), run_simulation_with_noise(noise_model, shots=shots)
 
 
@@ -272,7 +303,9 @@ def analyze_all_parameters_batched(iterations=20, shots=500, verbose=True):
     all_args = []
     param_ranges = {}
     
-    for param_name in _NOISE_PARAMS:
+    noise_params = get_noise_params()
+    
+    for param_name in noise_params:
         prange = (0, 5e-2) if 'gate' in param_name.lower() else (0, 2e-3)
         param_values = np.linspace(prange[0], prange[1], iterations)
         param_ranges[param_name] = param_values
@@ -298,7 +331,7 @@ def analyze_all_parameters_batched(iterations=20, shots=500, verbose=True):
     
     # Reorganize into per-parameter results
     all_param_results = {}
-    for param_name in _NOISE_PARAMS:
+    for param_name in noise_params:
         pvals = param_ranges[param_name]
         fids = np.array([results[(param_name, pv)] for pv in pvals])
         all_param_results[param_name] = (pvals, fids)
@@ -418,7 +451,7 @@ def plot_individual_analyses(coeffs, scaling_fidelities, all_param_results):
         if np.max(param_values) < 0.01:
             ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
     
-    plt.suptitle('Noise Analysis: GeminiOneZoneNoiseModel', fontsize=12, fontweight='bold', y=0.99)
+    plt.suptitle(f'Noise Analysis: {get_model_name()}', fontsize=12, fontweight='bold', y=0.99)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     
     return fig
@@ -430,24 +463,47 @@ def plot_individual_analyses(coeffs, scaling_fidelities, all_param_results):
 
 def main():
     """Main execution routine for comprehensive noise analysis."""
+    global _USE_TWO_ZONE
+    
+    # Prompt user for model selection
+    print("\n" + "="*80)
+    print("NOISE MODEL SELECTION")
+    print("="*80)
+    print("  1. GeminiOneZoneNoiseModel (15 parameters)")
+    print("  2. GeminiTwoZoneNoiseModel (21 parameters - includes sitter/mover)")
+    
+    while True:
+        choice = input("\nSelect noise model [1/2]: ").strip()
+        if choice == '1':
+            _USE_TWO_ZONE = False
+            break
+        elif choice == '2':
+            _USE_TWO_ZONE = True
+            break
+        else:
+            print("Invalid choice. Please enter 1 or 2.")
+    
+    noise_params = get_noise_params()
+    model_name = get_model_name()
     
     print("\n" + "="*80)
-    print("COMPREHENSIVE NOISE TESTING: ALL PARAMETERS")
+    print(f"COMPREHENSIVE NOISE TESTING: {model_name}")
     print("="*80)
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Configuration
     SCALING_COEFFS = np.linspace(0.1, 3.0, 30)
-    PARAM_ITERATIONS = 20  # Per parameter (15 params × 20 = 300 additional tests)
+    PARAM_ITERATIONS = 20  # Per parameter
     SHOTS_PER_TEST = 500
     
     print(f"\nConfiguration:")
+    print(f"  - Model: {model_name}")
     print(f"  - Scaling coefficients: {len(SCALING_COEFFS)} points")
-    print(f"  - Parameters to sweep: {len(_NOISE_PARAMS)}")
+    print(f"  - Parameters to sweep: {len(noise_params)}")
     print(f"  - Iterations per parameter: {PARAM_ITERATIONS}")
     print(f"  - Shots per test: {SHOTS_PER_TEST}")
     print(f"  - Parallel workers: {NUM_WORKERS}")
-    print(f"  - Total simulations: {len(SCALING_COEFFS) + len(_NOISE_PARAMS) * PARAM_ITERATIONS}")
+    print(f"  - Total simulations: {len(SCALING_COEFFS) + len(noise_params) * PARAM_ITERATIONS}")
     
     # ---- ANALYSIS 1: Scaling Coefficient ----
     print("\n" + "-"*80)
@@ -464,7 +520,7 @@ def main():
     
     # ---- ANALYSIS 2: All Custom Parameters (BATCHED) ----
     print("\n" + "-"*80)
-    print("ANALYSIS 2: All 15 Parameter Sweeps (Batched Parallel Execution)")
+    print(f"ANALYSIS 2: All {len(noise_params)} Parameter Sweeps (Batched Parallel Execution)")
     print("-"*80)
     
     param_results_dict = analyze_all_parameters_batched(
@@ -478,7 +534,7 @@ def main():
     param_summaries = {}
     
     print("\n  Per-parameter summaries:")
-    for param_name in _NOISE_PARAMS:
+    for param_name in noise_params:
         param_values, fidelities = param_results_dict[param_name]
         all_param_results.append((param_name, param_values, fidelities))
         
@@ -508,8 +564,11 @@ def main():
     print("-"*80)
     
     fig = plot_individual_analyses(coeffs, scaling_fidelities, all_param_results)
-    fig.savefig('noise_analysis_all_params.png', dpi=150, bbox_inches='tight')
-    print("✓ Saved: noise_analysis_all_params.png")
+    
+    # Use model-specific filename
+    png_filename = 'noise_analysis_two_zone.png' if _USE_TWO_ZONE else 'noise_analysis_one_zone.png'
+    fig.savefig(png_filename, dpi=150, bbox_inches='tight')
+    print(f"✓ Saved: {png_filename}")
     
     # ---- SAVE RESULTS ----
     print("\n" + "-"*80)
@@ -518,11 +577,12 @@ def main():
     
     results = {
         'timestamp': datetime.now().isoformat(),
+        'model': model_name,
         'configuration': {
             'scaling_coefficients': len(SCALING_COEFFS),
             'param_iterations': PARAM_ITERATIONS,
             'shots_per_test': SHOTS_PER_TEST,
-            'total_simulations': len(SCALING_COEFFS) + len(_NOISE_PARAMS) * PARAM_ITERATIONS,
+            'total_simulations': len(SCALING_COEFFS) + len(noise_params) * PARAM_ITERATIONS,
         },
         'scaling_analysis': {
             'coefficients': coeffs.tolist(),
@@ -539,14 +599,17 @@ def main():
         'impact_ranking': [name for name, _ in ranked],
     }
     
-    with open('noise_analysis_results.json', 'w') as f:
+    # Use model-specific JSON filename
+    json_filename = 'noise_analysis_two_zone_results.json' if _USE_TWO_ZONE else 'noise_analysis_one_zone_results.json'
+    with open(json_filename, 'w') as f:
         json.dump(results, f, indent=2)
-    print("✓ Saved: noise_analysis_results.json")
+    print(f"✓ Saved: {json_filename}")
     
     print("\n" + "="*80)
     print("ANALYSIS COMPLETE")
     print("="*80)
-    print(f"\n📊 Analyzed {len(_NOISE_PARAMS)} noise parameters + scaling coefficient")
+    print(f"\n📊 Model: {model_name}")
+    print(f"📊 Analyzed {len(noise_params)} noise parameters + scaling coefficient")
     print(f"📈 Most impactful: {ranked[0][0]} (drop={ranked[0][1]['fidelity_drop']:.4f})")
     print(f"📉 Least impactful: {ranked[-1][0]} (drop={ranked[-1][1]['fidelity_drop']:.4f})")
     
